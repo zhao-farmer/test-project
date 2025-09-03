@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <title>使用JS将视频帧提取出来并播放</title>
+
+        <style>
+            * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+
+            body {
+                font-family: Arial, sans-serif;
+                height: 100vh;
+                overflow-x: hidden;
+                overflow-y: scroll;
+                scroll-behavior: smooth;
+            }
+
+            .scroll-container {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100vh;
+            }
+
+            .image-container {
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+            }
+
+            .image-container img {
+                width: 100%;
+                height: 100%;
+                object-fit: cover;
+                transition: opacity 0.5s ease;
+            }
+
+            .content {
+                position: relative;
+                height: 500vh; /* 设置足够高的内容区域以产生滚动 */
+                z-index: 1;
+                pointer-events: none; /* 使内容区域不干扰滚动 */
+            }
+        </style>
+    </head>
+    <body>
+        <div>
+            <div id="statusText">将视频加载为图片帧</div>
+            <div class="scroll-container">
+                <div class="image-container">
+                    <canvas id="videoCanvas"></canvas>
+                </div>
+            </div>
+            <div class="content"></div>
+        </div>
+
+        <script>
+            const canvas = document.getElementById("videoCanvas");
+            canvas.height = window.innerHeight
+            canvas.width = window.innerWidth
+            const ctx = canvas.getContext("2d");
+            const statusText = document.getElementById("statusText");
+
+            // 视频帧相关变量
+            let videoFrames = [];
+            let currentFrameIndex = 0;
+            let videoDuration = 0;
+            let currentIndex = 0;                
+            let filePath = "./assets/test.mp4";
+
+
+            (async () => {
+
+
+                // 第一步: 创建 vidio 并加载视频
+                const video = await loadVideo(filePath);
+
+                // 第二步：使用await提取视频帧
+                videoFrames = await extractVideoFrames(video);
+
+                // 第三步：去除loading 加载第一张图片
+                statusText.style.display = "none";
+                drawCurrentFrame();
+
+                // 加载并处理视频
+                async function loadVideo() {
+                    return new Promise((resolve, reject) => {
+                        const video = document.createElement("video");
+                        video.loop = true;
+                        video.muted = true; // 静音以便自动播放
+
+                        video.src = filePath;
+
+                        video.addEventListener("loadedmetadata", function () {
+                            statusText.textContent = "视频加载完成，准备提取帧";
+                            resolve(video);
+                        });
+
+                        video.addEventListener("error", function () {
+                            reject(new Error("视频加载失败"));
+                        });
+
+                        // 预加载视频
+                        video.load();
+                    });
+                }
+
+                // 提取视频帧
+                async function extractVideoFrames(video) {
+                    return new Promise(resolve => {
+                        statusText.textContent = "正在提取视频帧...";
+                        const frames = [];
+                        const duration = video.duration;
+                        videoDuration = duration;
+
+                        // 计算需要提取的帧数（每秒10帧）
+                        const frameRate = 10;
+                        const totalFrames = Math.floor(duration * frameRate);
+
+                        let framesExtracted = 0;
+
+                        // 创建离屏canvas用于提取帧
+                        const offscreenCanvas = document.createElement("canvas");
+                        offscreenCanvas.width = video.videoWidth;
+                        offscreenCanvas.height = video.videoHeight;
+                        const offscreenCtx = offscreenCanvas.getContext("2d");
+
+                        // 逐帧提取
+                        function extractNextFrame() {
+                            if (framesExtracted >= totalFrames) {
+                                statusText.textContent = `帧提取完成，共 ${frames.length} 帧`;
+                                resolve(frames);
+                                return;
+                            }
+
+                            // 计算当前帧的时间
+                            const time = (framesExtracted / totalFrames) * duration;
+                            video.currentTime = time;
+
+                            // 更新进度
+                            const progress = Math.round((framesExtracted / totalFrames) * 100);
+                            statusText.textContent = `正在提取帧: ${progress}% (${framesExtracted}/${totalFrames})`;
+                        }
+
+                        // 当视频定位到指定时间时捕获帧
+                        video.onseeked = function () {
+                            // 绘制帧到离屏canvas
+                            offscreenCtx.drawImage(video, 0, 0, offscreenCanvas.width, offscreenCanvas.height);
+
+                            // 创建新的Image对象存储帧
+                            const frame = new Image();
+                            frame.src = offscreenCanvas.toDataURL();
+                            frames.push(frame);
+
+                            framesExtracted++;
+                            extractNextFrame();
+                        };
+
+                        // 开始提取
+                        extractNextFrame();
+                    });
+                }
+
+                // 下滑绘制
+                window.addEventListener("scroll", function () {
+                    // 计算滚动百分比 (0到1)
+                    const scrollHeight = document.documentElement.scrollHeight - window.innerHeight;
+                    const scrollTop = window.scrollY;
+                    const scrollPercent = scrollTop / scrollHeight;
+
+                    // 根据滚动百分比计算当前图片索引
+                    const newIndex = Math.min(Math.floor(scrollPercent * videoFrames.length), videoFrames.length - 1);
+
+                    // 如果索引变化，更新图片
+                    if (newIndex !== currentFrameIndex) {
+                        currentFrameIndex = newIndex;
+                        drawCurrentFrame()
+                    }
+                });
+                // 绘制当前帧
+                function drawCurrentFrame() {
+                    if (videoFrames.length === 0) return;
+
+                    const frame = videoFrames[currentFrameIndex];
+                    if (frame) {
+                        ctx.clearRect(0, 0, canvas.width, canvas.height);
+                        ctx.drawImage(frame, 0, 0, canvas.width, canvas.height);
+                    }
+                }
+
+            })();
+        </script>
+    </body>
+</html>
